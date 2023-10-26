@@ -92,6 +92,8 @@ int main()
     ground = g_world->CreateBody(&ground_bd);
     ground->CreateFixture(&ground_shape, 0.0f);
 
+    constexpr float fall_position = -30.0f;
+
     b2Body* box;
     b2PolygonShape box_shape;
     box_shape.SetAsBox(1.0f, 1.0f);
@@ -101,10 +103,30 @@ int main()
     box_fd.friction = 0.1f;
     b2BodyDef box_bd;
     box_bd.type = b2_dynamicBody;
-    box_bd.position.Set(-5.0f, 11.25f);
+    box_bd.position.Set(fall_position, 11.25f);
     box = g_world->CreateBody(&box_bd);
     box->CreateFixture(&box_fd);
+    box->SetAngularVelocity(5.0f);
 
+    // dominoes pieces
+    {
+		b2PolygonShape shape;
+		shape.SetAsBox(0.1f, 1.0f);
+
+		b2FixtureDef fd;
+		fd.shape = &shape;
+		fd.density = 20.0f;
+		fd.friction = 0.1f;
+
+		for (int i = 0; i < 60; ++i)
+		{
+			b2BodyDef bd;
+			bd.type = b2_dynamicBody;
+			bd.position.Set(fall_position + 0.7f + 1.0f * i, 1.0f);
+            b2Body* piece = g_world->CreateBody(&bd);
+            piece->CreateFixture(&fd);
+		}
+	}
 
     // This is the color of our background in RGB components
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
