@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <chrono>
 #include <thread>
+#include <set>
 
 #include "imgui/imgui.h"
 #include "imgui_impl_glfw_game.h"
@@ -56,7 +57,7 @@ void MouseButtonCallback(GLFWwindow* window, int32 button, int32 action, int32 m
         box_bd.position.Set(pw.x, pw.y);
         box = g_world->CreateBody(&box_bd);
         box->CreateFixture(&box_fd);
-        //bmox->SetAngularVelocity(5.0f);
+        box->SetAngularVelocity(1.0f);
     }
 }
 
@@ -186,6 +187,30 @@ int main()
         float timeStep = 60 > 0.0f ? 1.0f / 60 : float(0.0f);
         g_world->Step(timeStep, 8, 3);
 
+        // Get and handle contacts
+        std::set<b2Body*> to_delete;
+        b2Contact* contact = g_world->GetContactList();
+        while (contact != nullptr) {
+            if (contact->IsTouching()) {
+                b2Fixture *fixtureA = contact->GetFixtureA();
+                b2Fixture* fixtureB = contact->GetFixtureB();
+                b2Body* bodyA = fixtureA->GetBody();
+                b2Body* bodyB = fixtureB->GetBody();
+                // delete only if dynamic bodies (not floor) and they are both rotating
+                if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody &&
+                    bodyA->GetAngularVelocity() > 0 && bodyB->GetAngularVelocity() > 0) {
+                    to_delete.insert(bodyA);
+                    to_delete.insert(bodyB);
+                }
+            }
+            contact = contact->GetNext();
+        }
+        // Delete objects scheduled to be deleted
+        for (auto it = to_delete.begin(); it != to_delete.end();)
+        {
+            g_world->DestroyBody(*it);
+            it = to_delete.erase(it);
+        }
         // Render everything on the screen
         g_world->DebugDraw();
         g_debugDraw.Flush();
