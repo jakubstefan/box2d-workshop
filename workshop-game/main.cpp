@@ -3,6 +3,8 @@
 #include <chrono>
 #include <thread>
 #include <set>
+#include <vector>
+#include <iostream>
 
 #include "imgui/imgui.h"
 #include "imgui_impl_glfw_game.h"
@@ -20,29 +22,70 @@ b2World* g_world;
 std::set<b2Body*> to_delete;
 
 
+
+
+class Character {
+public:
+    b2Body* body;
+
+    Character(int p_size, float x, float y) {
+        size = p_size;
+        b2PolygonShape box_shape;
+        box_shape.SetAsBox(size / 500.0f, size / 500.0f);
+        b2FixtureDef box_fd;
+        box_fd.shape = &box_shape;
+        box_fd.density = 20.0f;
+        box_fd.friction = 0.1f;
+        b2BodyDef box_bd;
+        box_bd.userData.pointer = (uintptr_t)this;
+        box_bd.type = b2_dynamicBody;
+        box_bd.position.Set(x, y);
+        body = g_world->CreateBody(&box_bd);
+        body->CreateFixture(&box_fd);
+    }
+    virtual ~Character() {
+        std::cout << __func__ << std::endl;
+        g_world->DestroyBody(body);
+    }
+
+private:
+    int size;
+};
+
+std::vector<std::unique_ptr<Character>> characters;
+
 class MyCollisionListener : public b2ContactListener {
 public:
     void BeginContact(b2Contact* contact) override
     {
-        std::cout << "Collision happened\n";
+        b2Fixture* fixtureA = contact->GetFixtureA();
+        b2Fixture* fixtureB = contact->GetFixtureB();
+        b2Body* bodyA = fixtureA->GetBody();
+        b2Body* bodyB = fixtureB->GetBody();
+        // delete only if dynamic bodies (not floor) and they are both Characters
+        if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody) {
+            if (bodyA->GetUserData().pointer && bodyB->GetUserData().pointer) {
+                std::cout << "Collision between characters happened" << std::endl;
+                to_delete.insert(bodyA);
+                to_delete.insert(bodyB);
+                std::cout << "Scheduled deletion for two bodies" << std::endl;
+            }
+        }
     }
     void EndContact(b2Contact* contact) override
     {
-        std::cout << "Collision ceased\n";
 
         b2Fixture *fixtureA = contact->GetFixtureA();
         b2Fixture* fixtureB = contact->GetFixtureB();
         b2Body* bodyA = fixtureA->GetBody();
         b2Body* bodyB = fixtureB->GetBody();
-        // delete only if dynamic bodies (not floor) and they are both rotating
-        if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody &&
-            bodyA->GetAngularVelocity() > 0 && bodyB->GetAngularVelocity() > 0) {
-            to_delete.insert(bodyA);
-            to_delete.insert(bodyB);
+        if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody) {
+            if (bodyA->GetUserData().pointer && bodyB->GetUserData().pointer) {
+                std::cout << "Collision between characters ceased\n";
+            }
         }
     }
 };
-
 
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
@@ -71,19 +114,7 @@ void MouseButtonCallback(GLFWwindow* window, int32 button, int32 action, int32 m
     b2Vec2 pw = g_camera.ConvertScreenToWorld(ps);
 
     if (action == GLFW_PRESS) {
-        b2Body* box;
-        b2PolygonShape box_shape;
-        box_shape.SetAsBox(1.0f, 1.0f);
-        b2FixtureDef box_fd;
-        box_fd.shape = &box_shape;
-        box_fd.density = 20.0f;
-        box_fd.friction = 0.1f;
-        b2BodyDef box_bd;
-        box_bd.type = b2_dynamicBody;
-        box_bd.position.Set(pw.x, pw.y);
-        box = g_world->CreateBody(&box_bd);
-        box->CreateFixture(&box_fd);
-        box->SetAngularVelocity(1.0f);
+        characters.push_back(std::make_unique<Character>(yd, pw.x, pw.y));
     }
 }
 
@@ -140,19 +171,7 @@ int main()
 
     constexpr float fall_position = -30.0f;
 
-    b2Body* box;
-    b2PolygonShape box_shape;
-    box_shape.SetAsBox(1.0f, 1.0f);
-    b2FixtureDef box_fd;
-    box_fd.shape = &box_shape;
-    box_fd.density = 20.0f;
-    box_fd.friction = 0.1f;
-    b2BodyDef box_bd;
-    box_bd.type = b2_dynamicBody;
-    box_bd.position.Set(fall_position, 11.25f);
-    box = g_world->CreateBody(&box_bd);
-    box->CreateFixture(&box_fd);
-    box->SetAngularVelocity(5.0f);
+    characters.push_back(std::make_unique<Character>(500, fall_position, 11.25f));
 
     // dominoes pieces
     {
@@ -218,10 +237,29 @@ int main()
         g_world->Step(timeStep, 8, 3);
 
         // Delete objects scheduled to be deleted
-        for (auto it = to_delete.begin(); it != to_delete.end();)
-        {
-            g_world->DestroyBody(*it);
-            it = to_delete.erase(it);
+        if (!to_delete.empty()) {
+            std::cout << "Deleting objects scheduled to be deleted..." << std::endl;
+            for (auto itb = to_delete.begin(); itb != to_delete.end();)
+            {
+                // find and delete character
+                auto const& itc = std::find_if(characters.begin(), characters.end(), [&](std::unique_ptr<Character>& c)
+                 {
+                    if (c->body == *itb)
+                        return &c;
+                 });
+                if (itc != characters.end()) {
+                    std::cout << "Found character to delete" << std::endl;
+                    itc->reset();
+                    std::cout << "Reseted pointer to character" << std::endl;
+                    characters.erase(itc);
+                    std::cout << "Removed character from list" << std::endl;
+                }
+                // Delete body and remove from to_delete
+                std::cout << "Deleted body" << std::endl;
+                itb = to_delete.erase(itb);
+                std::cout << "Removed from to_delete list" << std::endl;
+            }
+            std::cout << std::endl;
         }
 
         // Render everything on the screen
@@ -254,6 +292,12 @@ int main()
     }
 
     // Terminate the program if it reaches here
+    std::cout << "Cleaning charater list...\n";
+    for (auto&& c : characters) {
+        c.reset();
+    }
+    characters.clear();
+    std::cout << "Done\n";
     glfwTerminate();
     g_debugDraw.Destroy();
     delete g_world;
