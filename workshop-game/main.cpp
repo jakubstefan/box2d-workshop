@@ -17,6 +17,32 @@
 GLFWwindow* g_mainWindow = nullptr;
 
 b2World* g_world;
+std::set<b2Body*> to_delete;
+
+
+class MyCollisionListener : public b2ContactListener {
+public:
+    void BeginContact(b2Contact* contact) override
+    {
+        std::cout << "Collision happened\n";
+    }
+    void EndContact(b2Contact* contact) override
+    {
+        std::cout << "Collision ceased\n";
+
+        b2Fixture *fixtureA = contact->GetFixtureA();
+        b2Fixture* fixtureB = contact->GetFixtureB();
+        b2Body* bodyA = fixtureA->GetBody();
+        b2Body* bodyB = fixtureB->GetBody();
+        // delete only if dynamic bodies (not floor) and they are both rotating
+        if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody &&
+            bodyA->GetAngularVelocity() > 0 && bodyB->GetAngularVelocity() > 0) {
+            to_delete.insert(bodyA);
+            to_delete.insert(bodyB);
+        }
+    }
+};
+
 
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
@@ -92,6 +118,10 @@ int main()
     b2Vec2 gravity;
     gravity.Set(0.0f, -10.0f);
     g_world = new b2World(gravity);
+
+    // Set collision callbacks
+    MyCollisionListener collision;
+    g_world->SetContactListener(&collision);
 
     // Create debug draw. We will be using the debugDraw visualization to create
     // our games. Debug draw calls all the OpenGL functions for us.
@@ -187,30 +217,13 @@ int main()
         float timeStep = 60 > 0.0f ? 1.0f / 60 : float(0.0f);
         g_world->Step(timeStep, 8, 3);
 
-        // Get and handle contacts
-        std::set<b2Body*> to_delete;
-        b2Contact* contact = g_world->GetContactList();
-        while (contact != nullptr) {
-            if (contact->IsTouching()) {
-                b2Fixture *fixtureA = contact->GetFixtureA();
-                b2Fixture* fixtureB = contact->GetFixtureB();
-                b2Body* bodyA = fixtureA->GetBody();
-                b2Body* bodyB = fixtureB->GetBody();
-                // delete only if dynamic bodies (not floor) and they are both rotating
-                if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody &&
-                    bodyA->GetAngularVelocity() > 0 && bodyB->GetAngularVelocity() > 0) {
-                    to_delete.insert(bodyA);
-                    to_delete.insert(bodyB);
-                }
-            }
-            contact = contact->GetNext();
-        }
         // Delete objects scheduled to be deleted
         for (auto it = to_delete.begin(); it != to_delete.end();)
         {
             g_world->DestroyBody(*it);
             it = to_delete.erase(it);
         }
+
         // Render everything on the screen
         g_world->DebugDraw();
         g_debugDraw.Flush();
