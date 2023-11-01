@@ -22,12 +22,15 @@ b2World* g_world;
 std::set<b2Body*> to_delete;
 
 
-
+void debug_to_delete();
+void debug_characters();
 
 class Character {
+    friend std::ostream& operator<<(std::ostream& os, const Character& rhs) {
+        os << "Character{pointer:" << &rhs << ", size:" << rhs.size << ", body:" << rhs.body << "}";
+        return os;
+    }
 public:
-    b2Body* body;
-
     Character(int p_size, float x, float y) {
         size = p_size;
         b2PolygonShape box_shape;
@@ -44,22 +47,62 @@ public:
         body->CreateFixture(&box_fd);
     }
 
-    void OnCollision(const Character* other) {
-        to_delete.insert(this->body);
-        to_delete.insert(other->body);
-        std::cout << "Scheduled deletion for two bodies" << std::endl;
-    }
-
     virtual ~Character() {
-        std::cout << __func__ << std::endl;
+        std::cout << __FUNCTION__ << std::endl;
         g_world->DestroyBody(body);
     }
 
+    /* overloaded equality operator */
+    bool operator==(const Character& rhs) const {
+        std::cout << __FUNCTION__ << std::endl;
+        return this->body == rhs.body;
+    }
+    /* overloaded lower than operator */
+    bool operator<(const Character& rhs) const {
+        std::cout << __FUNCTION__ << ": " << this->size << " < " << rhs.size << " ?" << std::endl;
+        return this->size < rhs.size;
+    }
+
+    /* On collision callback */
+    void onCollision(Character* other) {
+        Character* character_to_delete = *this < *other ? this : other;
+        std::cout << __FUNCTION__ << std::endl;
+        std::cout << "  this: " << *this << (this == character_to_delete ? " (to be deleted)" : "") << std::endl;
+        std::cout << "  other: " << *other << (other == character_to_delete ? " (to be deleted)" : "") << std::endl;
+        to_delete.insert(character_to_delete->body);
+        debug_to_delete();
+    }
+
+    /* Get Character pointer from Body. If null, it is not a Character */
+    static Character* getCharacterPointerFromBody(const b2Body* body) {
+        return (Character*)body->GetUserData().pointer;
+    }
+
 private:
+    b2Body* body;
     int size;
 };
 
 std::vector<std::unique_ptr<Character>> characters;
+
+inline void debug_to_delete() {
+    std::cout << __FUNCTION__ << ": " << to_delete.size() << " body(ies)" << std::endl;
+    for (auto body : to_delete) {
+        std::cout << "  " << body;
+        const Character* const character_pointer = Character::getCharacterPointerFromBody(body);
+        if (character_pointer) {
+            std::cout << ": " << *character_pointer;
+        }
+        std::cout << std::endl;
+    }
+}
+
+inline void debug_characters() {
+    std::cout << __FUNCTION__ << ": " << characters.size() << " charater(s)" << std::endl;
+    for (auto&& character : characters) {
+        std::cout << "  " << *character << std::endl;
+    }
+}
 
 class MyCollisionListener : public b2ContactListener {
 public:
@@ -71,23 +114,23 @@ public:
         b2Body* bodyB = fixtureB->GetBody();
         // delete only if dynamic bodies (not floor) and they are both Characters
         if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody) {
-            Character* characterA_pointer = (Character*)bodyA->GetUserData().pointer;
-            Character* characterB_pointer = (Character*)bodyB->GetUserData().pointer;
+            Character* characterA_pointer = Character::getCharacterPointerFromBody(bodyA);
+            Character* characterB_pointer = Character::getCharacterPointerFromBody(bodyB);
             if (characterA_pointer && characterB_pointer) {
                 std::cout << "Collision between characters happened" << std::endl;
-                characterA_pointer->OnCollision(characterB_pointer);
+                characterA_pointer->onCollision(characterB_pointer);
+                std::cout << std::endl;
             }
         }
     }
     void EndContact(b2Contact* contact) override
     {
-
         b2Fixture *fixtureA = contact->GetFixtureA();
         b2Fixture* fixtureB = contact->GetFixtureB();
         b2Body* bodyA = fixtureA->GetBody();
         b2Body* bodyB = fixtureB->GetBody();
         if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody) {
-            if (bodyA->GetUserData().pointer && bodyB->GetUserData().pointer) {
+            if (Character::getCharacterPointerFromBody(bodyA) && Character::getCharacterPointerFromBody(bodyB)) {
                 std::cout << "Collision between characters ceased\n";
             }
         }
@@ -121,13 +164,53 @@ void MouseButtonCallback(GLFWwindow* window, int32 button, int32 action, int32 m
     b2Vec2 pw = g_camera.ConvertScreenToWorld(ps);
 
     if (action == GLFW_PRESS) {
+        std::cout << __FUNCTION__ << std::endl;
         characters.push_back(std::make_unique<Character>(yd, pw.x, pw.y));
+        debug_characters();
+        std::cout << std::endl;
+    }
+}
+
+void clear_bodies() {
+    if (!to_delete.empty()) {
+        std::cout << "Deleting objects scheduled to be deleted..." << std::endl;
+        debug_to_delete();
+        for (auto itb = to_delete.begin(); itb != to_delete.end();)
+        {
+            // find and delete character
+            Character* character_pointer = Character::getCharacterPointerFromBody(*itb);
+            if (character_pointer) {
+                // this is a Character
+                auto same_character = [character_pointer](std::unique_ptr<Character>& c) {
+                    return *c == *character_pointer;
+                    };
+                auto const& itc = std::find_if(characters.begin(), characters.end(), same_character);
+                if (itc != characters.end()) {
+                    std::cout << "Found character to delete: " << *(*itc) << std::endl;
+                    itc->reset();
+                    std::cout << "Reset pointer to character" << std::endl;
+                    characters.erase(itc);
+                    std::cout << "Removed character from list" << std::endl;
+                    debug_characters();
+                }
+            }
+            else {
+                // Destroy body from world
+                g_world->DestroyBody(*itb);
+                std::cout << "Deleted body" << std::endl;
+
+            }
+            // Remove body from to_delete
+            itb = to_delete.erase(itb);
+            std::cout << "Removed from to_delete list" << std::endl;
+            debug_to_delete();
+            std::cout << std::endl;
+        }
     }
 }
 
 int main()
 {
-
     // glfw initialization things
     if (glfwInit() == 0) {
         fprintf(stderr, "Failed to initialize GLFW\n");
@@ -243,31 +326,8 @@ int main()
         float timeStep = 60 > 0.0f ? 1.0f / 60 : float(0.0f);
         g_world->Step(timeStep, 8, 3);
 
-        // Delete objects scheduled to be deleted
-        if (!to_delete.empty()) {
-            std::cout << "Deleting objects scheduled to be deleted..." << std::endl;
-            for (auto itb = to_delete.begin(); itb != to_delete.end();)
-            {
-                // find and delete character
-                auto const& itc = std::find_if(characters.begin(), characters.end(), [&](std::unique_ptr<Character>& c)
-                 {
-                    if (c->body == *itb)
-                        return &c;
-                 });
-                if (itc != characters.end()) {
-                    std::cout << "Found character to delete" << std::endl;
-                    itc->reset();
-                    std::cout << "Reseted pointer to character" << std::endl;
-                    characters.erase(itc);
-                    std::cout << "Removed character from list" << std::endl;
-                }
-                // Delete body and remove from to_delete
-                std::cout << "Deleted body" << std::endl;
-                itb = to_delete.erase(itb);
-                std::cout << "Removed from to_delete list" << std::endl;
-            }
-            std::cout << std::endl;
-        }
+        /* Clear bodies scheduled to be deleted */
+        clear_bodies();
 
         // Render everything on the screen
         g_world->DebugDraw();
