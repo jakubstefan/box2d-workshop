@@ -43,6 +43,13 @@ public:
         body = g_world->CreateBody(&box_bd);
         body->CreateFixture(&box_fd);
     }
+
+    void OnCollision(const Character* other) {
+        to_delete.insert(this->body);
+        to_delete.insert(other->body);
+        std::cout << "Scheduled deletion for two bodies" << std::endl;
+    }
+
     virtual ~Character() {
         std::cout << __func__ << std::endl;
         g_world->DestroyBody(body);
@@ -64,11 +71,11 @@ public:
         b2Body* bodyB = fixtureB->GetBody();
         // delete only if dynamic bodies (not floor) and they are both Characters
         if (fixtureA->GetType() == b2_dynamicBody && fixtureB->GetType() == b2_dynamicBody) {
-            if (bodyA->GetUserData().pointer && bodyB->GetUserData().pointer) {
+            Character* characterA_pointer = (Character*)bodyA->GetUserData().pointer;
+            Character* characterB_pointer = (Character*)bodyB->GetUserData().pointer;
+            if (characterA_pointer && characterB_pointer) {
                 std::cout << "Collision between characters happened" << std::endl;
-                to_delete.insert(bodyA);
-                to_delete.insert(bodyB);
-                std::cout << "Scheduled deletion for two bodies" << std::endl;
+                characterA_pointer->OnCollision(characterB_pointer);
             }
         }
     }
