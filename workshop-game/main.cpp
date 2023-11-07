@@ -15,6 +15,9 @@
 
 #include "box2d/box2d.h"
 
+constexpr float gravityX = 0.0f;
+constexpr float gravityY = -10.0f;
+
 // GLFW main window pointer
 GLFWwindow* g_mainWindow = nullptr;
 
@@ -71,6 +74,14 @@ public:
         std::cout << "  other: " << *other << (other == character_to_delete ? " (to be deleted)" : "") << std::endl;
         to_delete.insert(character_to_delete->body);
         debug_to_delete();
+    }
+
+    int getSize() const {
+        return size;
+    }
+
+    b2Body* getBody() const {
+        return body;
     }
 
     /* Get Character pointer from Body. If null, it is not a Character */
@@ -141,6 +152,48 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 {
     // code for keys here https://www.glfw.org/docs/3.3/group__keys.html
     // and modifiers https://www.glfw.org/docs/3.3/group__mods.html
+
+    debug_characters();
+    std::cout << __FUNCTION__;
+
+    if (key == GLFW_KEY_UP && action == GLFW_PRESS) {
+        if (characters.empty())
+            return;
+        std::cout << " >> GLFW_KEY_UP && GLFW_PRESS && !characters.empty()";
+        Character* character = characters.back().get();
+        b2Body* body = character->getBody();
+        std::cout << " >> character " << character;
+        std::cout << " >> got Body" << body;
+        const b2ContactEdge const* contacts = body->GetContactList();
+        std::cout << " >> got contacts";
+        if (contacts) {
+            //std::cout << " >> contacts";
+            bool touching = false;
+
+            while (contacts != nullptr) {
+                int safe = 0;
+                b2Contact* contact = contacts->contact;
+                while (contact != nullptr/* && ++safe<5*/) {
+                    //std::cout << " >> contact:" << contact;
+                    /*if (contact->IsTouching()) {
+                        std::cout << " >> touching";
+                        touching = true;
+                        break;
+                    }*/touching = true;
+                    contact = contact->GetNext();
+                    //std::cout << " >> got next contact";
+                }
+                //std::cout << " >> next contacts";
+                contacts = contacts->next;
+            }
+            if (touching) {
+                std::cout << " >> applying impulse";
+                characters.back()->getBody()->ApplyLinearImpulseToCenter({ 0, 500 }, true);
+
+            }
+        }
+    }
+    std::cout << std::endl;
 }
 
 void MouseMotionCallback(GLFWwindow*, double xd, double yd)
@@ -237,7 +290,7 @@ int main()
 
     // Setup Box2D world and with some gravity
     b2Vec2 gravity;
-    gravity.Set(0.0f, -10.0f);
+    gravity.Set(gravityX, gravityY);
     g_world = new b2World(gravity);
 
     // Set collision callbacks
